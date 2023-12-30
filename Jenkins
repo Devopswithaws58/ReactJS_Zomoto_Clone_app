@@ -2,7 +2,7 @@ pipeline{
     agent any
     tools {
         jdk 'JDK17'
-        nodejs 'NodeJS-21'
+        nodejs 'NodeJS-18'
     }
     environment {
         SCANNER_HOME=tool 'sonar-scanner'
@@ -22,7 +22,7 @@ pipeline{
         }
         stage ('code review') {
             steps {
-                withSonarQubeEnv('sonar-scanner') {
+                withSonarQubeEnv('sonar-server') {
                     sh '''
                     $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
                     -Dsonar.projectKey=zomato '''
@@ -39,6 +39,38 @@ pipeline{
         stage ('Install Dependencies') {
             steps {
                 sh 'npm install'
+            }
+        }
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'dependency-check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+        stage ('docker build & push') {
+            steps{
+                script{
+                    withDockerRegistry(credentialsId: 'docker-hub', toolName: 'docker') {
+                        sh 'docker build -t zomato .'
+                        sh 'docker tag zomato devopswthaws58/zomato:latest'
+                        sh 'docker push devopswthaws58/zomato:latest'
+                    }
+                }
+            }
+        }
+        stage('trivy image scan') {
+            steps{
+                sh 'trivy image devopswthaws58/zomato:latest > trivy.txt'
+            }
+        }
+        stage('deploy to container') {
+            steps{
+                sh 'docker run -d --name zomato -p 3000:3000 devopswthaws58/zomato:latest'
             }
         }
     }
